@@ -159,10 +159,20 @@ export default function Backorders() {
         {isOpen && (
           <tr>
             <td colSpan={isResolved ? 8 : 10} style={{ padding: 0, background: '#f8fafc' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: 48 }} />
+                  <col style={{ width: '28%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '10%' }} />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th style={{ paddingLeft: 48, width: 48 }}></th>
+                    <th style={{ paddingLeft: 48 }}></th>
                     <th>Product</th>
                     <th>SKU</th>
                     <th>Category</th>
@@ -179,7 +189,7 @@ export default function Backorders() {
                     return (
                     <tr key={item.id} style={{ opacity: fullyReceived ? 0.5 : 1 }}>
                       <td style={{ paddingLeft: 48 }}></td>
-                      <td style={{ fontWeight: 500 }}>{item.product_name}</td>
+                      <td style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.product_name}</td>
                       <td>{item.sku ? <code style={{ fontSize: '0.8rem', color: '#6366f1' }}>{item.sku}</code> : <span style={{ color: '#94a3b8' }}>—</span>}</td>
                       <td>{item.category ? <span className="badge badge-gray">{item.category}</span> : <span style={{ color: '#94a3b8' }}>—</span>}</td>
                       <td style={{ fontWeight: 600 }}>{item.quantity_needed}</td>

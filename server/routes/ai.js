@@ -5,6 +5,23 @@ const { getDb } = require('../db');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+function parseJSON(text) {
+  // Strip markdown code blocks
+  let cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  // Find the first { and last } to extract JSON
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end !== -1) {
+    try {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    } catch (e) {
+      // fall through
+    }
+  }
+  // Last resort — return summary as plain text
+  return { health_score: 0, summary: text, critical_issues: [], warnings: [], recommendations: [], priority_skus: [], suggestions: [] };
+}
+
 router.post('/validate-product', async (req, res) => {
   const { product } = req.body;
   if (!product) return res.status(400).json({ error: 'product is required' });
@@ -40,8 +57,7 @@ Respond with JSON only:
       messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content[0].text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    res.json(jsonMatch ? JSON.parse(jsonMatch[0]) : { status: 'ok', issues: [], suggestions: [], summary: text });
+    res.json(parseJSON(text));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -72,32 +88,24 @@ router.post('/audit-backorders', async (req, res) => {
     });
   }
 
-  const prompt = `You are a dental supply fulfillment analyst. Audit these open backorders and identify risks, priorities, and action items.
+  const prompt = `You are a dental supply fulfillment analyst. Audit these open backorders briefly and concisely.
 
-Open Backorders (${backorders.length} items):
+Open Backorders (${backorders.length} orders):
 ${backorders.map(b =>
-  `Client: ${b.client || 'N/A'} | Supplier: ${b.supplier || 'N/A'} | Order Date: ${b.ordered_date || 'N/A'} | Days Waiting: ${b.days_waiting} | Items: ${b.items_summary} | Notes: ${b.notes || 'none'}`
+  `${b.client || 'No client'} | ${b.days_waiting}d | ${b.items_summary}`
 ).join('\n')}
 
-Analyze:
-1. Which backorders are critically overdue (14+ days) and need immediate escalation
-2. Backorders missing key info (no supplier, no client, no order date) that could cause fulfillment delays
-3. Patterns across suppliers or categories causing repeated backorders
-4. Which items to prioritize based on wait time and client impact
-5. Overall fulfillment health
-
-Respond with JSON only:
-{"health_score":0-100,"summary":"...","critical_issues":["..."],"warnings":["..."],"recommendations":["..."],"priority_skus":["..."]}`;
+Return JSON only. Keep every string under 120 characters. Max 5 items per array:
+{"health_score":0-100,"summary":"one sentence max","critical_issues":["..."],"warnings":["..."],"recommendations":["..."],"priority_skus":["..."]}`;
 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
+      max_tokens: 1024,
       messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content[0].text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    res.json(jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: text });
+    res.json(parseJSON(text));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -106,7 +114,7 @@ Respond with JSON only:
 router.post('/restock-suggestions', async (req, res) => {
   const db = await getDb();
   const orders = await db.all(`
-    SELECT o.client, o.supplier, o.status,
+    SELECT o.id, o.client, o.supplier, o.status,
       CAST((julianday('now') - julianday(COALESCE(o.ordered_date, o.created_at))) AS INTEGER) as days_waiting
     FROM backorder_orders o ORDER BY o.created_at DESC
   `);
@@ -114,41 +122,26 @@ router.post('/restock-suggestions', async (req, res) => {
     o.items = await db.all('SELECT * FROM backorder_items WHERE order_id = ?', o.id);
   }
 
-  if (orders.length === 0) return res.json({ suggestions: [], summary: 'No backorder history to analyze yet.' });
-
   const allItems = orders.flatMap(o => o.items.map(i => ({ ...i, supplier: o.supplier, status: o.status, days_waiting: o.days_waiting })));
+
+  if (allItems.length === 0) return res.json({ suggestions: [], summary: 'No backorder history to analyze yet.' });
 
   const prompt = `You are a dental supply procurement analyst. Based on this backorder history, recommend what items to proactively restock and how much to order.
 
 Backorder History:
 ${allItems.map(i => `${i.product_name}${i.sku ? ` [${i.sku}]` : ''} | Category: ${i.category || 'N/A'} | Qty: ${i.quantity_needed} | Supplier: ${i.supplier || 'N/A'} | Status: ${i.status} | Days waited: ${i.days_waiting}`).join('\n')}
 
-Based on frequency of backorders, quantities needed, and wait times, provide restock recommendations.
-
-Respond with JSON only:
-{
-  "summary": "...",
-  "suggestions": [
-    {
-      "product": "...",
-      "sku": "...",
-      "reason": "...",
-      "suggested_qty": 0,
-      "supplier": "...",
-      "priority": "high|medium|low"
-    }
-  ]
-}`;
+Return JSON only. Keep strings under 100 characters. Max 8 suggestions:
+{"summary":"one sentence","suggestions":[{"product":"...","sku":"...","reason":"...","suggested_qty":0,"supplier":"...","priority":"high|medium|low"}]}`;
 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
+      max_tokens: 1024,
       messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content[0].text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    res.json(jsonMatch ? JSON.parse(jsonMatch[0]) : { suggestions: [], summary: text });
+    res.json(parseJSON(text));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
