@@ -3,20 +3,32 @@ import { ai as aiApi } from '../api';
 
 const PRIORITY_BADGE = { high: 'badge-red', medium: 'badge-yellow', low: 'badge-gray' };
 
+function loadCached(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+}
+function saveCache(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
 export default function AuditPanel() {
   const [auditLoading, setAuditLoading] = useState(false);
-  const [auditResult, setAuditResult] = useState(null);
+  const [auditResult, setAuditResult] = useState(() => loadCached('tca_audit'));
+  const [auditTimestamp, setAuditTimestamp] = useState(() => localStorage.getItem('tca_audit_ts'));
   const [restockLoading, setRestockLoading] = useState(false);
-  const [restockResult, setRestockResult] = useState(null);
+  const [restockResult, setRestockResult] = useState(() => loadCached('tca_restock'));
+  const [restockTimestamp, setRestockTimestamp] = useState(() => localStorage.getItem('tca_restock_ts'));
   const [error, setError] = useState('');
 
   const runAudit = async () => {
     setAuditLoading(true);
     setError('');
-    setAuditResult(null);
     try {
       const r = await aiApi.auditBackorders();
+      const ts = new Date().toLocaleString();
       setAuditResult(r.data);
+      setAuditTimestamp(ts);
+      saveCache('tca_audit', r.data);
+      localStorage.setItem('tca_audit_ts', ts);
     } catch (e) {
       setError(e.response?.data?.error || 'Audit failed. Check that your ANTHROPIC_API_KEY is set.');
     }
@@ -26,10 +38,13 @@ export default function AuditPanel() {
   const runRestock = async () => {
     setRestockLoading(true);
     setError('');
-    setRestockResult(null);
     try {
       const r = await aiApi.restockSuggestions();
+      const ts = new Date().toLocaleString();
       setRestockResult(r.data);
+      setRestockTimestamp(ts);
+      saveCache('tca_restock', r.data);
+      localStorage.setItem('tca_restock_ts', ts);
     } catch (e) {
       setError(e.response?.data?.error || 'Failed. Check that your ANTHROPIC_API_KEY is set.');
     }
@@ -51,9 +66,12 @@ export default function AuditPanel() {
               Claude reviews all open backorders, flags overdue items and missing info, and tells you what to act on first.
             </p>
           </div>
-          <button className="btn btn-ai" onClick={runAudit} disabled={auditLoading}>
-            {auditLoading ? 'Analyzing...' : 'Run Audit'}
-          </button>
+          <div style={{ textAlign: 'right' }}>
+            <button className="btn btn-ai" onClick={runAudit} disabled={auditLoading}>
+              {auditLoading ? 'Analyzing...' : auditResult ? '↻ Refresh Audit' : 'Run Audit'}
+            </button>
+            {auditTimestamp && !auditLoading && <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>Last run: {auditTimestamp}</div>}
+          </div>
         </div>
 
         {auditLoading && <div className="loading"><div style={{ fontSize: '2rem', marginBottom: 8 }}>🔍</div>Reviewing open backorders...</div>}
@@ -125,9 +143,12 @@ export default function AuditPanel() {
               Claude looks at your backorder history and recommends what to proactively reorder and how much.
             </p>
           </div>
-          <button className="btn btn-ai" onClick={runRestock} disabled={restockLoading}>
-            {restockLoading ? 'Analyzing...' : 'Get Suggestions'}
-          </button>
+          <div style={{ textAlign: 'right' }}>
+            <button className="btn btn-ai" onClick={runRestock} disabled={restockLoading}>
+              {restockLoading ? 'Analyzing...' : restockResult ? '↻ Refresh Suggestions' : 'Get Suggestions'}
+            </button>
+            {restockTimestamp && !restockLoading && <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>Last run: {restockTimestamp}</div>}
+          </div>
         </div>
 
         {restockLoading && <div className="loading"><div style={{ fontSize: '2rem', marginBottom: 8 }}>📦</div>Analyzing backorder history...</div>}
