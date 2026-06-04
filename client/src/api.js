@@ -19,5 +19,5 @@ export const backorders = {
 
 export const ai = {
   auditBackorders: () => api.post('/ai/audit-backorders'),
-  restockSuggestions: () => api.post('/ai/restock-suggestions'),
+  restockSuggestions: (category) => api.post('/ai/restock-suggestions', { category }),
 };

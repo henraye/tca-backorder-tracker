@@ -113,6 +113,8 @@ Return JSON only. Keep every string under 120 characters. Max 5 items per array:
 
 router.post('/restock-suggestions', async (req, res) => {
   const db = await getDb();
+  const { category } = req.body;
+
   const orders = await db.all(`
     SELECT o.id, o.client, o.supplier, o.status,
       CAST((julianday('now') - julianday(COALESCE(o.ordered_date, o.created_at))) AS INTEGER) as days_waiting
@@ -122,17 +124,21 @@ router.post('/restock-suggestions', async (req, res) => {
     o.items = await db.all('SELECT * FROM backorder_items WHERE order_id = ?', o.id);
   }
 
-  const allItems = orders.flatMap(o => o.items.map(i => ({ ...i, supplier: o.supplier, status: o.status, days_waiting: o.days_waiting })));
+  let allItems = orders.flatMap(o => o.items.map(i => ({ ...i, status: o.status, days_waiting: o.days_waiting })));
 
-  if (allItems.length === 0) return res.json({ suggestions: [], summary: 'No backorder history to analyze yet.' });
+  if (category) {
+    allItems = allItems.filter(i => i.category?.toLowerCase().includes(category.toLowerCase()));
+  }
 
-  const prompt = `You are a dental supply procurement analyst. Based on this backorder history, recommend what items to proactively restock and how much to order.
+  if (allItems.length === 0) return res.json({ suggestions: [], summary: category ? `No backorder history found for category: ${category}` : 'No backorder history to analyze yet.' });
+
+  const prompt = `You are a dental supply procurement analyst. Based on this backorder history${category ? ` for the "${category}" category` : ''}, recommend what items to proactively restock and how much to order.
 
 Backorder History:
-${allItems.map(i => `${i.product_name}${i.sku ? ` [${i.sku}]` : ''} | Category: ${i.category || 'N/A'} | Qty: ${i.quantity_needed} | Supplier: ${i.supplier || 'N/A'} | Status: ${i.status} | Days waited: ${i.days_waiting}`).join('\n')}
-
+${allItems.map(i => `${i.product_name}${i.sku ? ` [${i.sku}]` : ''} | Category: ${i.category || 'N/A'} | Qty: ${i.quantity_needed} | Status: ${i.status} | Days waited: ${i.days_waiting}`).join('\n')}
+${category ? `\nFocus only on "${category}" items.` : ''}
 Return JSON only. Keep strings under 100 characters. Max 8 suggestions:
-{"summary":"one sentence","suggestions":[{"product":"...","sku":"...","reason":"...","suggested_qty":0,"supplier":"...","priority":"high|medium|low"}]}`;
+{"summary":"one sentence","suggestions":[{"product":"...","sku":"...","reason":"...","suggested_qty":0,"priority":"high|medium|low"}]}`;
 
   try {
     const response = await anthropic.messages.create({

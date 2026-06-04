@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ai as aiApi } from '../api';
+import React, { useState, useEffect } from 'react';
+import { ai as aiApi, backorders as backordersApi } from '../api';
 
 const PRIORITY_BADGE = { high: 'badge-red', medium: 'badge-yellow', low: 'badge-gray' };
 
@@ -15,9 +15,29 @@ export default function AuditPanel() {
   const [auditResult, setAuditResult] = useState(() => loadCached('tca_audit'));
   const [auditTimestamp, setAuditTimestamp] = useState(() => localStorage.getItem('tca_audit_ts'));
   const [restockLoading, setRestockLoading] = useState(false);
-  const [restockResult, setRestockResult] = useState(() => loadCached('tca_restock'));
-  const [restockTimestamp, setRestockTimestamp] = useState(() => localStorage.getItem('tca_restock_ts'));
+  const [restockCache, setRestockCache] = useState(() => {
+    const cache = loadCached('tca_restock_cache') || {};
+    // migrate old single-key cache
+    const old = loadCached('tca_restock');
+    const oldTs = localStorage.getItem('tca_restock_ts');
+    if (old && !cache['__all__']) cache['__all__'] = { data: old, ts: oldTs || '' };
+    return cache;
+  });
+  const [restockCategory, setRestockCategory] = useState('');
+  const [availableCategories, setAvailableCategories] = useState([]);
+
+  const restockResult = restockCache[restockCategory || '__all__']?.data || null;
+  const restockTimestamp = restockCache[restockCategory || '__all__']?.ts || null;
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    backordersApi.all().then(r => {
+      const cats = [...new Set(
+        r.data.flatMap(o => o.items?.map(i => i.category).filter(Boolean) || [])
+      )].sort();
+      setAvailableCategories(cats);
+    }).catch(() => {});
+  }, []);
 
   const runAudit = async () => {
     setAuditLoading(true);
@@ -39,12 +59,12 @@ export default function AuditPanel() {
     setRestockLoading(true);
     setError('');
     try {
-      const r = await aiApi.restockSuggestions();
+      const r = await aiApi.restockSuggestions(restockCategory || null);
       const ts = new Date().toLocaleString();
-      setRestockResult(r.data);
-      setRestockTimestamp(ts);
-      saveCache('tca_restock', r.data);
-      localStorage.setItem('tca_restock_ts', ts);
+      const key = restockCategory || '__all__';
+      const updated = { ...restockCache, [key]: { data: r.data, ts } };
+      setRestockCache(updated);
+      saveCache('tca_restock_cache', updated);
     } catch (e) {
       setError(e.response?.data?.error || 'Failed. Check that your ANTHROPIC_API_KEY is set.');
     }
@@ -143,11 +163,23 @@ export default function AuditPanel() {
               Claude looks at your backorder history and recommends what to proactively reorder and how much.
             </p>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <button className="btn btn-ai" onClick={runRestock} disabled={restockLoading}>
-              {restockLoading ? 'Analyzing...' : restockResult ? '↻ Refresh Suggestions' : 'Get Suggestions'}
-            </button>
-            {restockTimestamp && !restockLoading && <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>Last run: {restockTimestamp}</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select
+                value={restockCategory}
+                onChange={e => setRestockCategory(e.target.value)}
+                style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: '0.875rem' }}
+              >
+                <option value="">All Categories</option>
+                {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button className="btn btn-ai" onClick={runRestock} disabled={restockLoading}>
+                {restockLoading ? 'Analyzing...' : restockResult ? '↻ Refresh' : 'Get Suggestions'}
+              </button>
+            </div>
+            {restockTimestamp && !restockLoading && (
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Last run: {restockTimestamp}</div>
+            )}
           </div>
         </div>
 
@@ -166,7 +198,6 @@ export default function AuditPanel() {
                       <th>Product</th>
                       <th>SKU</th>
                       <th>Suggested Qty</th>
-                      <th>Supplier</th>
                       <th>Priority</th>
                       <th>Reason</th>
                     </tr>
@@ -177,7 +208,6 @@ export default function AuditPanel() {
                         <td style={{ fontWeight: 500 }}>{s.product}</td>
                         <td>{s.sku ? <code style={{ fontSize: '0.8rem', color: '#6366f1' }}>{s.sku}</code> : '—'}</td>
                         <td style={{ fontWeight: 600 }}>{s.suggested_qty}</td>
-                        <td>{s.supplier || '—'}</td>
                         <td><span className={`badge ${PRIORITY_BADGE[s.priority] || 'badge-gray'}`}>{s.priority}</span></td>
                         <td style={{ fontSize: '0.8rem', color: '#64748b' }}>{s.reason}</td>
                       </tr>
