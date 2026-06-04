@@ -121,6 +121,33 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Update resolved_quantity on a single item
+router.put('/:orderId/items/:itemId', async (req, res) => {
+  const db = await getDb();
+  const { resolved_quantity } = req.body;
+  const item = await db.get('SELECT * FROM backorder_items WHERE id = ? AND order_id = ?', [req.params.itemId, req.params.orderId]);
+  if (!item) return res.status(404).json({ error: 'Item not found' });
+
+  const newResolved = Math.min(parseInt(resolved_quantity) || 0, item.quantity_needed);
+  await db.run('UPDATE backorder_items SET resolved_quantity = ? WHERE id = ?', [newResolved, req.params.itemId]);
+
+  // Auto-resolve the order if all items are fully received
+  const items = await db.all('SELECT * FROM backorder_items WHERE order_id = ?', req.params.orderId);
+  const allResolved = items.every(i => {
+    const qty = i.id === parseInt(req.params.itemId) ? newResolved : i.resolved_quantity;
+    return qty >= i.quantity_needed;
+  });
+
+  if (allResolved) {
+    await db.run(`UPDATE backorder_orders SET status='resolved', resolved_at=datetime('now'), updated_at=datetime('now') WHERE id=?`, req.params.orderId);
+  } else {
+    await db.run(`UPDATE backorder_orders SET status='open', resolved_at=NULL, updated_at=datetime('now') WHERE id=?`, req.params.orderId);
+  }
+
+  const orders = await getOrdersWithItems(db, 'WHERE o.id = ?', [req.params.orderId]);
+  res.json(orders[0]);
+});
+
 router.delete('/:id', async (req, res) => {
   const db = await getDb();
   const result = await db.run('DELETE FROM backorder_orders WHERE id = ?', req.params.id);

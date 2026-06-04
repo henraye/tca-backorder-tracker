@@ -34,6 +34,7 @@ export default function Backorders() {
   const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
   const [editId, setEditId] = useState(null);
   const [search, setSearch] = useState('');
+  const [pendingQty, setPendingQty] = useState({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const fileRef = useRef();
@@ -166,18 +167,61 @@ export default function Backorders() {
                     <th>SKU</th>
                     <th>Category</th>
                     <th>Qty Needed</th>
+                    <th>Received</th>
+                    <th>Status</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {order.items.map(item => (
-                    <tr key={item.id}>
+                  {order.items.map(item => {
+                    const fullyReceived = item.resolved_quantity >= item.quantity_needed;
+                    const partiallyReceived = item.resolved_quantity > 0 && !fullyReceived;
+                    return (
+                    <tr key={item.id} style={{ opacity: fullyReceived ? 0.5 : 1 }}>
                       <td style={{ paddingLeft: 48 }}></td>
                       <td style={{ fontWeight: 500 }}>{item.product_name}</td>
                       <td>{item.sku ? <code style={{ fontSize: '0.8rem', color: '#6366f1' }}>{item.sku}</code> : <span style={{ color: '#94a3b8' }}>—</span>}</td>
                       <td>{item.category ? <span className="badge badge-gray">{item.category}</span> : <span style={{ color: '#94a3b8' }}>—</span>}</td>
                       <td style={{ fontWeight: 600 }}>{item.quantity_needed}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            type="number" min="0" max={item.quantity_needed}
+                            value={pendingQty[item.id] ?? item.resolved_quantity}
+                            style={{ width: 64, padding: '3px 6px', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: '0.8rem' }}
+                            onChange={e => {
+                              const val = Math.min(Math.max(parseInt(e.target.value) || 0, 0), item.quantity_needed);
+                              setPendingQty(prev => ({ ...prev, [item.id]: val }));
+                            }}
+                          />
+                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>/ {item.quantity_needed}</span>
+                          {pendingQty[item.id] !== undefined && pendingQty[item.id] !== item.resolved_quantity && (
+                            <button className="btn btn-primary btn-sm" onClick={async () => {
+                              const val = pendingQty[item.id];
+                              const updated = await backordersApi.resolveItem(order.id, item.id, val);
+                              setOrders(prev => prev.map(o => o.id === order.id ? updated.data : o));
+                              setPendingQty(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+                            }}>Confirm</button>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {fullyReceived && <span className="badge badge-green">Received</span>}
+                        {partiallyReceived && <span className="badge badge-yellow">Partial</span>}
+                        {!fullyReceived && !partiallyReceived && <span className="badge badge-gray">Pending</span>}
+                      </td>
+                      <td>
+                        {!fullyReceived && (
+                          <button className="btn btn-success btn-sm" onClick={async () => {
+                            const updated = await backordersApi.resolveItem(order.id, item.id, item.quantity_needed);
+                            setOrders(prev => prev.map(o => o.id === order.id ? updated.data : o));
+                            setPendingQty(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+                          }}>✓ All</button>
+                        )}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </td>
@@ -298,12 +342,16 @@ export default function Backorders() {
 
             <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
               {items.map((item, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 80px 36px', gap: 8, padding: '10px 12px', borderBottom: i < items.length - 1 ? '1px solid #f1f5f9' : 'none', alignItems: 'center', background: 'white' }}>
-                  <input value={item.product_name} onChange={setItemField(i, 'product_name')} placeholder="Product name *" />
-                  <input value={item.sku} onChange={setItemField(i, 'sku')} placeholder="SKU" />
-                  <input value={item.category} onChange={setItemField(i, 'category')} placeholder="Category" />
-                  <input type="number" min="1" value={item.quantity_needed} onChange={setItemField(i, 'quantity_needed')} placeholder="Qty" />
-                  <button className="btn btn-danger btn-sm" onClick={() => removeItem(i)} disabled={items.length === 1} style={{ padding: '5px 8px' }}>✕</button>
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderBottom: i < items.length - 1 ? '1px solid #f1f5f9' : 'none', background: 'white' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input style={{ flex: 3 }} value={item.product_name} onChange={setItemField(i, 'product_name')} placeholder="Product name *" />
+                    <input style={{ flex: 1, minWidth: 60 }} type="number" min="1" value={item.quantity_needed} onChange={setItemField(i, 'quantity_needed')} placeholder="Qty" />
+                    <button className="btn btn-danger btn-sm" onClick={() => removeItem(i)} disabled={items.length === 1} style={{ padding: '5px 8px', flexShrink: 0 }}>✕</button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input style={{ flex: 1 }} value={item.sku} onChange={setItemField(i, 'sku')} placeholder="SKU (optional)" />
+                    <input style={{ flex: 1 }} value={item.category} onChange={setItemField(i, 'category')} placeholder="Category (optional)" />
+                  </div>
                 </div>
               ))}
             </div>

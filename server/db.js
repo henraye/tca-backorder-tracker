@@ -28,6 +28,7 @@ async function getDb() {
       sku TEXT,
       category TEXT,
       quantity_needed INTEGER NOT NULL DEFAULT 1,
+      resolved_quantity INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (order_id) REFERENCES backorder_orders(id) ON DELETE CASCADE
     );
   `);
